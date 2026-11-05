@@ -1,0 +1,5 @@
+scorer,size,preprocess,AUROC_mean,AUROC_std,AUPRC_mean,AUPRC_std
+MI,5,cluster,0.6099,0.0367,0.3391,0.027
+MI,5,smooth,0.5912,0.0699,0.3092,0.0239
+cramer,5,cluster,0.6517,0.0029,0.3717,0.0075
+cramer,5,smooth,0.6035,0.0022,0.2854,0.0027

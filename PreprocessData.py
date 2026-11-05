@@ -49,7 +49,7 @@ def smooth(df_p, df_e, slipe, k=5):
             # take zeros into consideration
             res = df.apply(lambda x:x.value_counts().get(0,0), axis=0).astype(float)
             for item in range(len(df.columns)):
-                res[item]=0.0 if res[item]>=k/2 else df.iloc[:, item].mean()
+                res.iloc[item]=0.0 if res.iloc[item]>=k/2 else df.iloc[:, item].mean()
             df_mean = res.to_frame().T
             df_mean.index=[j]
 
