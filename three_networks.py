@@ -1,6 +1,14 @@
 # -*- coding:utf-8 -*-
 """
-Compare the three networks on the same data.
+three_networks.py - compare the three networks on the same data. The main capstone result.
+
+FUNCTIONS
+    mi_mrmr        MI scores + mRMR deletion, same steps as main.py
+    rank_ensemble  average each gene pair's rank across several networks
+    plot           the three-panel figure (fair AUROC, old AUROC, window-to-window change)
+    main           runs everything and writes three_network_results/
+
+DETAILS
 
   original      sliding windows (PreprocessData.smooth)   -> MI -> mRMR   (main.py --preprocess smooth)
   cluster       scPADGRN order_cluster                    -> MI -> mRMR   (main.py --preprocess cluster)
@@ -57,6 +65,8 @@ def mi_mrmr(df_proc, count, n_jobs):
 
 def rank_ensemble(nets, genes):
     """Average the rank of every gene pair across networks (missing pairs rank last)."""
+    # Rank 1 = weakest pair. Pairs a network did not output get the lowest ranks
+    # (na_option="top" with ascending ranks). The mean rank becomes the new score.
     from itertools import permutations
     allp = pd.DataFrame(list(permutations(genes, 2)), columns=["Gene1", "Gene2"])
     ranks = []

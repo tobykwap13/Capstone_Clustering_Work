@@ -1,4 +1,26 @@
 # -*- coding:utf-8 -*-
+"""
+Evaluate.py - grading functions from the original pipeline code (Lingling Zhang, July 2025).
+
+SUMMARY
+    concat_ref(df, df_r)
+        Labels each edge in a method's output list as real (1) or fake (0) by
+        matching it against the reference network. Drops self loops.
+    cal_auc_aupr(df)
+        AUROC and AUPRC of the labeled list from concat_ref.
+    cal_EPR(df, k, sparsity)
+        Early precision: share of real edges among the top k, and its ratio
+        to random (EPR).
+    add_sign_and_plot(df_edge, expression_file, ...)
+        Marks each edge activation or inhibition using partial correlation
+        and draws the network as a circle plot.
+
+WARNING
+    concat_ref + cal_auc_aupr score only the edges a method output. Pairs a
+    method deleted never enter the grade, so this is fine for one method's own
+    ranking but unfair for comparing methods with different edge lists.
+    eval_full.py fixes this by grading every method on all gene pairs.
+"""
 import pandas as pd
 from sklearn import metrics
 from sklearn.covariance import GraphicalLassoCV
@@ -18,10 +40,14 @@ def concat_ref(df, df_r):
 
     Output: dataFrame of the outputFile with ground truth
     '''
+    # Rename columns so the merge below lines up on Gene1/Gene2
     df.columns = ['Gene1', 'Gene2', 'score']
     #df_r.columns = ['Gene1', 'Gene2']
+    # Every reference edge gets real_score = 1. A left merge keeps only the
+    # method's output edges, so pairs the method did not output are never seen.
     df_r['real_score'] = 1
     df = pd.merge(df, df_r, how='left')
+    # Output edges missing from the reference are fake (0)
     df.loc[df.real_score.isna(), 'real_score'] = 0
     df = df.loc[df.Gene1!=df.Gene2].drop_duplicates(keep='first')
     return df
@@ -36,6 +62,8 @@ def cal_auc_aupr(df):
 
     Output: a dict with keys ['auroc', 'auprc']
     '''
+    # ROC curve: true positive rate vs false positive rate as the score cutoff moves.
+    # PR curve: precision vs recall over the same cutoffs. Area under each = the metric.
     scores = df.score.values
     true = df.real_score.astype(int).values
     fpr, tpr, thresholds = metrics.roc_curve(true, scores, pos_label=1)
@@ -56,6 +84,7 @@ def cal_EPR(df, k, sparsity):
 
     Output: a dict with keys of EP, EPR on the top k edges
     '''
+    # TP = real edges among the top k. EP = TP / k. EPR = EP / (EP of random guessing).
     k = min(k, len(df))
     df = df.sort_values(by='score', ascending=False)
     TP = df.iloc[:k, :].real_score.sum().astype(int)
@@ -92,6 +121,8 @@ def add_sign_and_plot(df_edge, expression_file, top_k=None, plot=True, output_pd
     df_edge = df_edge.drop_duplicates(subset=['Gene1', 'Gene2'])
 
     # Compute partial correlation matrix
+    # Partial correlation = correlation between two genes after removing the
+    # effect of every other gene. Positive = activation, negative = inhibition.
     X = df_exp.values
     model = GraphicalLassoCV().fit(X)
     precision = model.precision_

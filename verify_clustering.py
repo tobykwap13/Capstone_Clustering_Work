@@ -1,6 +1,15 @@
 # -*- coding:utf-8 -*-
 """
-Step 1: verify order_cluster.py does what scPADGRN's orderCluster.R does.
+verify_clustering.py - Step 1: verify order_cluster.py does what scPADGRN's orderCluster.R does.
+
+SUMMARY
+    A  The Python port matches a line-by-line copy of the R code on 200 random datasets.
+    B  The R original has an off-by-one bug (it adds the wrong cell when a new
+       cluster starts). The Python port uses the fixed version.
+    C  A toy dataset with 3 planted groups comes back as those 3 groups.
+    D  Sanity checks on the real GSD data: cluster counts, every cell used once,
+       clusters contiguous in pseudotime, breaks at the largest gaps.
+    E  Report only: cluster sizes for 3, 5, 10 and 20 cells per cluster.
 
 Run from the Pseudo-network folder:
     python verify_clustering.py

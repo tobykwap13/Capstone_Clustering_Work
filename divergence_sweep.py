@@ -1,6 +1,18 @@
 # -*- coding:utf-8 -*-
 """
-Which divergence gives the best AUROC, for cluster vs smooth preprocessing?
+divergence_sweep.py - which divergence gives the best AUROC, for cluster vs smooth preprocessing?
+
+SUMMARY
+    For each run (clean + 5 noisy) and each preprocessing (cluster, smooth):
+    score all gene pairs with each of the 14 scores in divergence_scores.py,
+    apply mRMR at lambda 0 / 0.5 / 1 / 1.5, and grade with both old and fair
+    scoring. Results live in divergence_results/.
+
+FUNCTIONS
+    prune(df, scorer, lam, n_jobs)   mRMR step (MRMR2 for MI, MRMR2_divergence otherwise)
+    main()                           the sweep loop and summary tables
+
+DETAILS
 
 Runs: run 0 = clean data, runs 1..R = Gaussian noise (same noise model and
 seeds as sweep.py), so every scorer and preprocess sees the same data in a run.
@@ -31,8 +43,11 @@ from sweep import add_noise
 
 
 def prune(df, scorer, lam, n_jobs):
+    # lambda 0 = skip mRMR and keep the raw ranking
     if lam == 0:
         return df
+    # MI path deletes pairs with adjusted score <= 0 (as in main.py).
+    # Divergence path keeps all pairs and only re-ranks them.
     if scorer == "MI":
         out = MRMR2(df.loc[df.score > 0], n_jobs, lambda_val=lam)
         out = out.loc[out.score > 0]

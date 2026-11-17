@@ -1,5 +1,14 @@
 # -*- coding:utf-8 -*-
 """
+divergence_scores.py - 14 pairwise edge scores for the divergence comparison.
+
+FUNCTIONS
+    lag_pairs      regulator at step t, target at step t+1, inside each branch
+    _prob          turn a profile into a probability vector (clip at 0, add tiny constant, sum to 1)
+    kl_fwd ... ks  one function per score (see SCORERS)
+    score_pairs    run one score over every ordered gene pair
+
+DETAILS
 Pairwise edge scores for the divergence comparison. Every scorer returns a
 long table Gene1 (regulator), Gene2 (target), score, with HIGH score = more
 likely edge.
@@ -31,6 +40,7 @@ EPS = 1e-10
 
 
 def lag_pairs(x, y, count, lag=1):
+    # count = rows per branch. Shift inside each branch, then join the branches.
     xs, ys, s = [], [], 0
     for c in count:
         xs.append(x[s:s + c - lag])
@@ -44,6 +54,7 @@ def _prob(v):
     return v / v.sum()
 
 
+# Kullback-Leibler: forward KL(regulator || target), backward KL(target || regulator)
 def kl_fwd(x, y):  return entropy(_prob(x), _prob(y))
 def kl_bwd(x, y):  return entropy(_prob(y), _prob(x))
 def kl_sym(x, y):  return 0.5 * (kl_fwd(x, y) + kl_bwd(x, y))
@@ -55,6 +66,8 @@ def js(x, y):
     return 0.5 * entropy(p, m) + 0.5 * entropy(q, m)
 
 
+# Hellinger, total variation and Bhattacharyya all compare the two probability
+# vectors point by point. Hellinger and Bhattacharyya rank pairs almost the same.
 def hellinger(x, y):
     p, q = _prob(x), _prob(y)
     return np.sqrt(0.5 * np.sum((np.sqrt(p) - np.sqrt(q)) ** 2))
@@ -78,6 +91,7 @@ def ks(x, y):              return ks_2samp(x, y).statistic
 
 
 # name: (function, flip sign?)
+# flip = True for distances (low = similar = likely edge), so high always means likely edge
 SCORERS = {
     "MI": (mi, False),
     "dcor": (dist_corr, False),

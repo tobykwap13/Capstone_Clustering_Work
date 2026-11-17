@@ -1,4 +1,39 @@
 # -*- coding:utf-8 -*-
+"""
+psedoScore.py - pairwise gene scores used to rank possible edges.
+
+SUMMARY
+    Every function here takes two genes, X (possible regulator) and Y (possible
+    target), and returns one number for the pair X -> Y. Scores use a time lag
+    of 1: X at step t-1 compared with Y at step t, since a regulator acts
+    before its target responds. The "...2" functions run a scorer over every
+    gene pair in parallel and return a table Gene1, Gene2, score.
+
+FAMILIES
+    Mutual information (the original pipeline)
+        MI_Gao, cal_mi, cal_mi2: k-nearest-neighbor estimate of how much X's
+        past tells you about Y. High = likely edge.
+    Profile divergences (low = likely edge, flip the sign before ranking)
+        kl_divergence / cal_kl2          forward Kullback-Leibler
+        cal_backward / cal_backward_kl   backward Kullback-Leibler
+        symmetric_kl_divergence / cal_kl2_symmetric
+        js_divergence / cal_js2          Jensen-Shannon
+        Each gene's lagged profile gets rescaled to sum to 1 and treated as a
+        probability vector over time.
+    Value-distribution distances (ignore time order, low = likely edge)
+        cal_wasserstein2, cal_energy2
+    Dependence
+        cal_cramer / cal_cramer2: NOTE this computes DISTANCE CORRELATION,
+        not the Cramer distance. High = likely edge.
+    Helpers
+        compute_optimal_lag: lag with the highest distance correlation
+        run_divergence: run any scorer over all gene pairs
+
+KNOWN QUIRKS
+    The divergence scorers lag with x[:-1], y[1:] over the stacked branches,
+    so one pair crosses the branch boundary. divergence_scores.py fixes this.
+    cal_mi lags inside each branch correctly.
+"""
 import numpy as np
 import pandas as pd
 import scipy.spatial as ss
@@ -27,6 +62,9 @@ def MI_Gao(x,y,k=5):
 
     assert len(x)==len(y), "Lists should have same length"
     assert k <= len(x)-1, "Set k smaller than num. samples - 1"
+    # Mixed-KSG estimator: for each point, find the distance to its k-th
+    # nearest neighbor in the joint (x, y) space, count neighbors inside
+    # that distance in x alone and y alone, and combine with digamma terms.
     N = len(x)
     data = np.c_[x, y]
 
@@ -45,6 +83,7 @@ def MI_Gao(x,y,k=5):
 
     for i in range(N):
         kp, nx, ny = k, k, k
+        # Tied points (common with zeros in scRNA-seq) get a discrete correction
         if knn_dis[i] == 0:
             kp = len(tree_xy.query_ball_point(data[i],1e-15,p=float('inf')))
             nx = len(tree_x.query_ball_point(x[i],1e-15,p=float('inf')))
@@ -99,11 +138,15 @@ def cal_mi(i, j, x, y, count):
     dc = np.array(dc)
     MAXD = np.argmax(dc)  
 '''
+    # The block above (inside quotes, inactive) picked the lag with the highest
+    # distance correlation. The pipeline now fixes the lag at 1.
     MAXD = 1  # Fixed lag = 1
 
     sums = 0
     # Xt_L:Xt-2, Xt-1, Xt
     # Yt_L:Yt-2, Yt-1, Yt
+    # Build lagged pairs branch by branch so no pair crosses a branch boundary:
+    # X at steps 0..n-2 of each branch, Y at steps 1..n-1.
     for k in range(len(count)):
         xraw = x.copy()
         yraw = y.copy()
@@ -139,6 +182,7 @@ def cal_mi2(data, count, n_jobs=1, TF_set=[]):
     
     print('---------- data.shape=', data.shape)
 
+    # All ordered gene pairs (or TF x gene pairs if a TF list is given), no self pairs
     if len(TF_set) == 0:
         gene_combs = list(permutations(data.columns.values, 2))
     else:
@@ -292,6 +336,8 @@ def cal_backward(i, j, x, y, count):
     """Compute backward KL: KL(Y_t || X_{t-1})"""
     x_aligned = x[:-1]
     y_aligned = y[1:]
+    # scipy's entropy rescales both vectors to sum to 1. No +1e-10 here, so a
+    # zero in x where y > 0 gives an infinite score.
     return {'Gene1': i, 'Gene2': j, 'score': entropy(y_aligned, x_aligned)}  # assume already smoothed
 
 def cal_backward_kl(data, n_jobs=1, TF_set=[]):
@@ -310,6 +356,7 @@ def cal_backward_kl(data, n_jobs=1, TF_set=[]):
     return df_res
 
 def cal_wasserstein(i, j, x, y, count):
+    # Compares the spread of values only. Time order inside each vector is ignored.
     return {'Gene1': i, 'Gene2': j, 'score': wasserstein_distance(x[:-1], y[1:])}
 
 def cal_wasserstein2(data, n_jobs=1, TF_set=[]):
@@ -368,6 +415,7 @@ def cal_energy2(data, n_jobs=1, TF_set=[]):
 
 
 def cal_cramer(i, j, x, y, count):
+    # Despite the name, this is distance correlation (0 = independent, 1 = fully dependent)
     try:
         score = dcor.distance_correlation(x[:-1], y[1:])
     except Exception:

@@ -1,3 +1,28 @@
+"""
+PreprocessData.py - turn single cells ordered by pseudotime into smoother samples.
+
+SUMMARY
+    Single cells are noisy and full of zeros. Before scoring gene pairs, the
+    pipeline averages nearby cells along pseudotime.
+
+FUNCTIONS
+    write_file(filePath, text)
+        Writes a list to a text file, one item per line.
+    smooth(df_p, df_e, slipe, k=5)
+        THE ORIGINAL PREPROCESSING. For each branch: sort cells by pseudotime,
+        slide a window of k cells forward slipe cells at a time, and average each
+        window. A gene with zeros in half or more of a window gets 0 instead of
+        the mean. Returns (count, df): rows per branch, and the averaged
+        expression with branches stacked.
+    compute_f_divergence(p1, p2, divergence_type)
+        Smooths two samples into density curves (kernel density estimate) and
+        returns the Kullback-Leibler or Jensen-Shannon divergence between them.
+    smooth_divergence(df_pse, df_exp, slide, k, distance)
+        Experimental alternative to smooth(). Instead of a window average, each
+        row holds how much each gene's values change between window t and the
+        window one cell later, measured by the chosen divergence (codes below).
+        Not used by main.py or the capstone scripts.
+"""
 import pandas as pd
 import numpy as np 
 import pandas as pd
@@ -26,27 +51,33 @@ def smooth(df_p, df_e, slipe, k=5):
             expression profile after preprocessing
     '''
     count = []    
+    # One pass per pseudotime branch (one column of df_p per branch)
     for i in range(len(df_p.columns)):
+        # Cells in this branch, sorted by pseudotime, joined to their expression
         df_p_c = df_p.iloc[:, i:(i + 1)].dropna()
         df_p_c.columns = ['pseudotime']
         df_p_c.sort_values(by=['pseudotime'], ascending=True, inplace=True)
         df_p_e = pd.merge(df_p_c, df_e, left_index=True, right_index=True)
-        df_ee = df_p_e.iloc[:, 1:]
+        df_ee = df_p_e.iloc[:, 1:]          # drop the pseudotime column, keep genes
         
         start = 0
         end = 0
         j = 0
 
         df_e_new = pd.DataFrame()
+        # Slide the window until it reaches the last cell of the branch
         while end==0:
             j = j + 1
             if (start+k) < len(df_ee.index):
                 df = df_ee.iloc[start:(start+k), :]
             else:
+                # Last window: snap it to the final k cells and stop
                 df = df_ee.iloc[(len(df_ee.index)-k):len(df_ee.index), :]
                 end = 1
 
             # take zeros into consideration
+            # Count zeros per gene. If half or more of the window is 0, the gene
+            # counts as off (0). Otherwise use the window mean.
             res = df.apply(lambda x:x.value_counts().get(0,0), axis=0).astype(float)
             for item in range(len(df.columns)):
                 res.iloc[item]=0.0 if res.iloc[item]>=k/2 else df.iloc[:, item].mean()
@@ -65,12 +96,13 @@ def smooth(df_p, df_e, slipe, k=5):
         else:
             df_e_all = pd.concat([df_e_all, df_e_new])
 
-        count.append(len(df_e_new))
+        count.append(len(df_e_new))     # rows produced for this branch
     return count, df_e_all
 
 #############new funcs:
 
 def compute_f_divergence(p1, p2, divergence_type="kullback-leibler"):
+    # Fit a smooth density curve to each sample
     kde_p1 = gaussian_kde(p1)
     kde_p2 = gaussian_kde(p2)
     
@@ -83,6 +115,8 @@ def compute_f_divergence(p1, p2, divergence_type="kullback-leibler"):
     density_p1 = kde_p1(grid)
     density_p2 = kde_p2(grid)
     
+    # Evaluate both curves on a shared grid, add a tiny constant to avoid
+    # log(0), and rescale each to sum to 1 so they act as probability vectors
     epsilon = 1e-10
     density_p1 = (density_p1 + epsilon) / np.sum(density_p1 + epsilon)
     density_p2 = (density_p2 + epsilon) / np.sum(density_p2 + epsilon)
@@ -118,6 +152,7 @@ def smooth_divergence(df_pse, df_exp, slide=1, k=5, distance=7):  # example: dis
             if end + 1 > N:
                 break
 
+            # Window t and the same window shifted one cell later
             data_t = df_exp_sorted.iloc[start:end, :]
             data_t1 = df_exp_sorted.iloc[start + 1:end + 1, :]
 
@@ -180,6 +215,8 @@ def smooth_divergence(df_pse, df_exp, slide=1, k=5, distance=7):  # example: dis
             # Append smoothed row
             df_exp_smooth = pd.concat([df_exp_smooth, pd.DataFrame(row_values, index=[0])], ignore_index=True)
             #count.append(k)
+            # NOTE: this runs once per window, so count gets one entry per
+            # window, not one per branch as smooth() returns. Check before using.
             count.append(num_windows)
 
     return count, df_exp_smooth

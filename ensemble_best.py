@@ -1,6 +1,19 @@
 # -*- coding:utf-8 -*-
 """
-AUROC booster check: rank-average the smooth lasso network with the best
+ensemble_best.py - AUROC booster check.
+
+SUMMARY
+    Builds three networks per run (smooth lasso, cluster + distance correlation,
+    cluster + backward KL), tries each alone and in rank-averaged combinations,
+    and grades all with fair scoring. Output: three_network_results/ensemble_best.csv.
+
+CAUTION
+    The two divergence networks and their lambda values came from
+    divergence_sweep.py results on this same reference network. Treat the
+    combined scores as optimistic until tested on a second dataset.
+
+DETAILS
+Rank-average the smooth lasso network with the best
 divergence networks from divergence_sweep.py (cluster + dcor, cluster + backward KL).
 Same clean + 5 noisy runs and seeds as three_networks.py.
 
@@ -24,6 +37,7 @@ warnings.filterwarnings("ignore")
 
 
 def div_net(proc, count, scorer, lam):
+    # Score all pairs, then re-rank with divergence mRMR (lambda 0 = no mRMR)
     e = score_pairs(proc, count, scorer)
     return MRMR2_divergence(e, lambda_val=lam) if lam > 0 else e
 

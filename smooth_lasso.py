@@ -1,7 +1,27 @@
 # -*- coding:utf-8 -*-
 """
-Network 3: "smooth lasso". scPADGRN's dynamic network model run on
-pseudotime instead of real time points.
+smooth_lasso.py - Network 3: "smooth lasso". scPADGRN's dynamic network model
+run on pseudotime instead of real time points.
+
+SUMMARY
+    Builds one network per pseudotime window, with two rules: keep each network
+    sparse (few edges) and keep neighboring windows' networks close (smooth).
+    The final edge score averages each edge's strength over all windows.
+
+FUNCTIONS
+    build_stages          cells -> windows -> clusters -> Y(t) matrices
+    _pairs                Y(t) -> (input, change) pairs for the regression
+    fit_dynamic_network   solves the objective below with cvxpy
+    edges_from_A          A(t) matrices -> ranked edge list with signs
+    smooth_lasso_network  runs the three steps above in one call
+    network_change        how much the network moves between windows
+    cv_select             picks alpha and beta by cross-validation, never by AUROC
+
+DEFAULTS USED IN THE CAPSTONE RESULTS
+    n_windows = 5, r = 30, standardize = False (raw scale), pairing = "scpadgrn",
+    alpha and beta from cv_select. See three_networks.py.
+
+DETAILS
 
 Steps for each pseudotime branch:
   1. Sort cells by pseudotime and cut them into n_windows equal-count windows.
@@ -47,14 +67,17 @@ def build_stages(df_pse, df_exp, n_windows=5, r=30, standardize=True):
       seq: list over branches of (clusters x genes array, window id per cluster)
     """
     X = df_exp.astype(float)
+    # Optional: rescale each gene to mean 0, SD 1 so genes weigh equally.
+    # The capstone runs use raw scale (standardize=False), which scored better.
     if standardize:
         X = (X - X.mean()) / X.std(ddof=0).replace(0, 1)
 
-    Y = [[] for _ in range(n_windows)]
-    seq = []
+    Y = [[] for _ in range(n_windows)]   # Y[t] collects each branch's clusters for window t
+    seq = []                             # per branch: all clusters in order + their window id
     for col in df_pse.columns:
         pt = df_pse[col].dropna().sort_values()
         rows, wid = [], []
+        # Cut this branch into equal-count windows, cluster inside each one
         for t, cells in enumerate(_branch_windows(pt, n_windows)):
             sub_p = pd.DataFrame({col: pt.loc[cells]})
             _, clus = order_cluster(sub_p, X.loc[cells], k=min(r, len(cells)))
@@ -63,14 +86,16 @@ def build_stages(df_pse, df_exp, n_windows=5, r=30, standardize=True):
             rows.append(M)
             wid += [t] * len(M)
         seq.append((np.vstack(rows), np.array(wid)))
-    Y = [np.hstack(y) for y in Y]
+    Y = [np.hstack(y) for y in Y]        # put branches side by side
     return Y, seq
 
 
 def _pairs(Y, seq, pairing):
     """Build (X_t, dX_t) for each transition t: dX = A(t) X."""
+    # scPADGRN pairing: column k of window t lines up with column k of window t+1
     if pairing == "scpadgrn":
         return [(Y[t], Y[t + 1] - Y[t]) for t in range(len(Y) - 1)]
+    # Consecutive pairing: each cluster with the next cluster along its branch
     T = len(Y)
     src = [[] for _ in range(T)]
     dif = [[] for _ in range(T)]
@@ -83,10 +108,13 @@ def _pairs(Y, seq, pairing):
 
 def fit_dynamic_network(pairs, alpha=0.05, beta=0.05, solver="CLARABEL"):
     """Solve the scPADGRN objective. Returns list of A(t), genes x genes."""
-    m = pairs[0][0].shape[0]
-    n_tot = sum(Xt.shape[1] for Xt, _ in pairs)
-    off = 1.0 - np.eye(m)
-    A = [cp.Variable((m, m)) for _ in pairs]
+    m = pairs[0][0].shape[0]                       # number of genes
+    n_tot = sum(Xt.shape[1] for Xt, _ in pairs)    # total samples, scales the fit term
+    off = 1.0 - np.eye(m)                          # mask: penalize off-diagonal entries only
+    A = [cp.Variable((m, m)) for _ in pairs]       # one genes x genes network per transition
+    # fit:    how well A(t) Y(t) predicts the change Y(t+1) - Y(t)
+    # sparse: L1 penalty, pushes weak edges to exactly 0
+    # smooth: L1 penalty on the difference between neighboring networks
     fit = sum(cp.sum_squares(dX - A[t] @ Xt) for t, (Xt, dX) in enumerate(pairs)) / (2 * n_tot)
     sparse = sum(cp.sum(cp.abs(cp.multiply(off, a))) for a in A)
     smooth = sum(cp.sum(cp.abs(cp.multiply(off, A[t + 1] - A[t]))) for t in range(len(A) - 1))
@@ -97,6 +125,8 @@ def fit_dynamic_network(pairs, alpha=0.05, beta=0.05, solver="CLARABEL"):
 
 def edges_from_A(A_list, genes):
     """Edge j -> i scored by mean |A(t)[i, j]| over windows. Also returns the sign."""
+    # Edge strength = average absolute weight over windows. Sign = direction of
+    # the average weight (+ activation, - repression).
     W = np.mean([np.abs(a) for a in A_list], axis=0)
     S = np.sign(np.mean(A_list, axis=0))
     rows = []
@@ -123,6 +153,7 @@ def network_change(A_list, tol=1e-4):
         a, b = A_list[t].copy(), A_list[t + 1].copy()
         np.fill_diagonal(a, 0)
         np.fill_diagonal(b, 0)
+        # An edge "exists" in a window if its weight is above tol
         ea, eb = np.abs(a) > tol, np.abs(b) > tol
         union = (ea | eb).sum()
         rows.append({"step": f"W{t+1}->W{t+2}",
@@ -144,7 +175,7 @@ def cv_select(df_pse, df_exp, n_windows=5, r=30, standardize=True,
     """
     Y, _ = build_stages(df_pse, df_exp, n_windows, r, standardize)
     n_col = Y[0].shape[1]
-    fold = np.random.default_rng(seed).permutation(n_col) % folds
+    fold = np.random.default_rng(seed).permutation(n_col) % folds   # fold id per cluster column
     rows = []
     for a in alphas:
         for b in betas:
@@ -156,6 +187,7 @@ def cv_select(df_pse, df_exp, n_windows=5, r=30, standardize=True,
                 err += sum(np.sum(((Y[t + 1] - Y[t])[:, te] - A[t] @ Y[t][:, te]) ** 2)
                            for t in range(len(Y) - 1))
             rows.append({"alpha": a, "beta": b, "cv_error": err})
+    # Lowest held-out prediction error wins
     tab = pd.DataFrame(rows)
     best = tab.loc[tab.cv_error.idxmin()]
     return float(best.alpha), float(best.beta), tab

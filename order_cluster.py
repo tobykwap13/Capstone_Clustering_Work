@@ -1,3 +1,21 @@
+"""
+order_cluster.py - scPADGRN's cell clustering step, ported from R to Python.
+
+SUMMARY
+    Replaces the sliding-window smoothing (PreprocessData.smooth) with
+    scPADGRN's orderCluster idea: walk along pseudotime, find the biggest jumps
+    in expression between neighboring cells, cut there, and average each piece.
+    Each piece (cluster) holds cells which sit next to each other in pseudotime
+    and look alike.
+
+    Used by main.py (--preprocess cluster), sweep.py, three_networks.py and,
+    inside each pseudotime window, by smooth_lasso.py.
+
+FUNCTIONS
+    order_cluster(df_p, df_e, k, cells_per_cluster, return_labels)
+        Returns (count, df) in the same format as smooth(), so the rest of the
+        pipeline runs unchanged.
+"""
 import numpy as np
 import pandas as pd
 
@@ -28,15 +46,17 @@ def order_cluster(df_p, df_e, k=None, cells_per_cluster=5, return_labels=False):
       labels (only if return_labels=True): one row per cell per branch with
             columns cell, branch, pseudotime, cluster (row number in df)
     """
-    count = []
-    out = []
-    labels = []
-    offset = 0
+    count = []      # clusters per branch
+    out = []        # cluster-averaged expression, one dataframe per branch
+    labels = []     # which cluster each cell landed in (for checking)
+    offset = 0      # running cluster number across branches
     for col in df_p.columns:
+        # Cells in this branch, ordered by pseudotime, as a cells x genes matrix
         pt = df_p[col].dropna().sort_values()
         M = df_e.loc[pt.index].to_numpy(dtype=float)
         n = M.shape[0]
 
+        # Number of clusters: given directly, or about n / cells_per_cluster
         kk = k if k is not None else max(2, n // cells_per_cluster)
         kk = min(kk, n)
 
@@ -49,17 +69,20 @@ def order_cluster(df_p, df_e, k=None, cells_per_cluster=5, return_labels=False):
         else:
             breaks = np.array([], dtype=int)
 
+        # Split the ordered cells at the breaks and average each group
         groups = np.split(M, breaks)
         clustered = np.vstack([g.mean(axis=0) for g in groups])
 
         out.append(pd.DataFrame(clustered, columns=df_e.columns))
         count.append(len(groups))
 
+        # Record cell -> cluster membership (cluster numbers start at 1)
         cluster_id = np.repeat(np.arange(len(groups)), [len(g) for g in groups]) + offset + 1
         labels.append(pd.DataFrame({"cell": pt.index, "branch": col,
                                     "pseudotime": pt.values, "cluster": cluster_id}))
         offset += len(groups)
 
+    # Stack branches into one table, rows numbered from 1 like smooth()
     df_all = pd.concat(out, ignore_index=True)
     df_all.index = range(1, len(df_all) + 1)
     if return_labels:

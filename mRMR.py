@@ -1,4 +1,34 @@
- # -*- coding:utf-8 -*-
+# -*- coding:utf-8 -*-
+"""
+mRMR.py - minimum Redundancy, Maximum Relevance filter for edge lists.
+
+SUMMARY
+    After every gene pair gets a score, many high-scoring regulators of one
+    target carry the same information (they rise and fall together, or one only
+    looks related through another). mRMR re-scores the candidates for each
+    target, one target at a time:
+
+        adjusted score = relevance - lambda x (average redundancy with
+                                               regulators already picked)
+
+    It picks the best candidate, adds it to the picked set, re-scores the rest,
+    and repeats. Candidates resembling earlier picks lose score.
+
+FUNCTIONS
+    MRMR(data_v, data, lambda_val)
+        mRMR for one target gene with mutual information scores.
+    MRMR2(data, n_jobs, lambda_val)
+        Runs MRMR for every target in parallel. Used by main.py. Returns all
+        pairs with adjusted scores. main.py then DELETES pairs with score <= 0,
+        which is where real edges get dropped.
+    MRMR2_divergence(df_mi, n_jobs, lambda_val)
+        Same idea for divergence-style scores (Equation 9). Keeps every pair
+        and re-ranks it, deleting nothing.
+    MRMR2_kl(df_kl, n_jobs)
+        Older KL version. Keeps a pair only if its adjusted score stays above 0.
+
+lambda_val sets how hard redundancy gets punished. 0 = no mRMR effect.
+"""
 import pandas as pd
 from Evaluate import *
 from pqdm.processes import pqdm
@@ -16,15 +46,18 @@ def MRMR(data_v, data, lambda_val=1.0):
 
     Output: dataFrame containing the revised mutual information
     '''
+    # Candidates for this target, strongest first. One candidate = nothing to filter.
     data_v = data_v.sort_values(by='score', ascending=False)
     if len(data_v) == 1:
         return data_v
 
     length = len(data_v)-1
     df_res = pd.DataFrame(columns=data.columns)
+    # The top candidate always gets picked first with its original score
     df_res = pd.concat([df_res, data_v.iloc[[0], :]])
 
     df = data_v.copy().iloc[1:, :]
+    # Remaining candidates: mi = relevance to the target, red = running redundancy total
     df.columns = ['Gene1', 'Gene2', 'mi']
     df['red'] = 0
 
@@ -34,15 +67,18 @@ def MRMR(data_v, data, lambda_val=1.0):
     for t in range(length):
         if len(TF_candidate)==0:
             break
+        # Redundancy of each candidate with the regulator picked last:
+        # its score toward that regulator, added to the running total
         temp = data.loc[data.Gene2==TF_selected[-1]]
         temp = temp[['Gene1', 'score']]
         df = pd.merge(df, temp, on='Gene1', how='left').fillna(0)
         df['red'] += df['score']
         #df['temp'] = df['mi'] - df['red']/len(TF_selected)
-        df['temp'] = df['mi'] - lambda_val * df['red']/len(TF_selected)
+        df['temp'] = df['mi'] - lambda_val * df['red']/len(TF_selected)   # adjusted score
 
         df = df.sort_values(by='temp', ascending=False)
 
+        # Pick the best adjusted candidate and record its adjusted score
         add_edge = df.iloc[0][['Gene1', 'Gene2']]
         add_edge['score'] = df.iloc[0,:]['temp']
         df_res = pd.concat([df_res, add_edge.to_frame().T])
@@ -58,6 +94,7 @@ def MRMR(data_v, data, lambda_val=1.0):
 def MRMR2(data, n_jobs=1, lambda_val=1.0):
     print('---------- data.shape=', data.shape)
 
+    # One MRMR job per target gene, run in parallel with pqdm
     target = list(data.Gene2.drop_duplicates())
     #params = [[data.loc[data.Gene2==v], data] for v in target]
     params = [[data.loc[data.Gene2==v], data, lambda_val] for v in target]
@@ -65,7 +102,7 @@ def MRMR2(data, n_jobs=1, lambda_val=1.0):
     df_res = pd.DataFrame(columns=data.columns)
     for i in range(len(result)):
         if isinstance(result[i], pd.DataFrame):
-            df_res = pd.concat([df_res, result[i]])
+            df_res = pd.concat([df_res, result[i]])   # stack the per-target results
         else:
             print(type(result[i]))
     return df_res
@@ -100,6 +137,7 @@ def MRMR2_divergence(df_mi, n_jobs=1, lambda_val=1.0):
             continue
 
         # Initialize
+        # S = picked regulators, U = unpicked candidates (strongest first)
         S = []  # selected TFs for this target gene
         U = df_target.sort_values(by='score', ascending=False)['Gene1'].tolist()
         scores_to_target = df_target.set_index('Gene1')['score'].to_dict()
@@ -110,6 +148,7 @@ def MRMR2_divergence(df_mi, n_jobs=1, lambda_val=1.0):
             best_gene = None
             best_adjusted_score = -np.inf  # Track the adjusted score
 
+            # Find the candidate with the best adjusted score this round
             for gene_x in U:
                 div_xz = scores_to_target.get(gene_x, 0)
                 if not S:

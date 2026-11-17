@@ -4,6 +4,30 @@
 Created on Wed Jul  2 14:28:04 2025
 
 @author: linglingzhang
+
+run_4new pseudo_methods_example.py - try four other pseudotime methods in
+place of Slingshot.
+
+SUMMARY
+    PART 1  Builds pseudotime four ways from input/ExpressionData.csv and saves
+            each to a CSV:
+              PHATE    distance from the first cell in PHATE space
+              Diffmap  diffusion pseudotime (scanpy dpt)
+              PCA      first principal component, rescaled to 0..1
+              PAGA     Leiden clusters + PAGA graph, then diffusion pseudotime
+    PART 2  For each pseudotime file: 5 noisy copies of the data, sliding-window
+            smoothing, then forward KL, symmetric KL and JS scores with mRMR.
+            Saves AUROC / AUPRC per run and network plots.
+    PART 3  Same loop with backward KL, Wasserstein, energy and the "cramer"
+            score (distance correlation).
+
+NOTES
+    Parts 2 and 3 import from EstimateMI, a file missing from the repo. Point
+    those imports at psedoScore to run them.
+    Scoring uses concat_ref + cal_auc_aupr, which grades only the edges each
+    method outputs (see Evaluate.py / eval_full.py).
+    Each PART writes files named "timlag=2" while reading "timelag=1" files,
+    so check file names before running.
 """
 # Replace the Slingshot
 import pandas as pd
@@ -111,6 +135,8 @@ os.makedirs(output_dir, exist_ok=True)
 
 
 def add_noise_to_expression(expression_file: str, output_file: str, noise_level: float = 0.05) -> None:
+    # Noise for each gene = random normal x (gene's max - min) x noise_level.
+    # Negative values after noise get clipped to 0.
     """Add Gaussian noise to gene expression data and save."""
     df = pd.read_csv(expression_file, index_col=0)
     ranges = df.max() - df.min()
@@ -153,9 +179,11 @@ for method_name, pse_path in pseudotime_files.items():
         df_exp_noisy = pd.read_csv(noise_path, index_col=0)
 
         # Use average smoothing (Normi-style)
+        # count = rows per branch, df_exp_sorted = window-averaged expression
         count, df_exp_sorted = smooth(df_pse, df_exp_noisy, slipe=1, k=5)
 
         for name, (score_func, mrmr_func) in divergences.items():
+            # Score all gene pairs, prune with mRMR, then grade against the reference
             df_score = score_func(df_exp_sorted, n_jobs=4)
             df_mrmr = mrmr_func(df_score, n_jobs=4)
             df_eval = concat_ref(df_mrmr, df_ref)

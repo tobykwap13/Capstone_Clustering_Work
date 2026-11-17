@@ -1,3 +1,26 @@
+"""
+run_slingshot_distance_example.py - divergence scores on Slingshot pseudotime,
+from the original pipeline code (Lingling Zhang).
+
+SUMMARY
+    PART 1  5 noisy copies of the data -> sliding-window smoothing -> 11 pair
+            scores (KL family, JS, Wasserstein, energy, "cramer", Pearson
+            variants, Neyman) -> divergence mRMR at 7 lambda values -> AUROC /
+            AUPRC and a network plot for each. save_results_wide_format_fixed
+            turns the results into one row per score x lambda.
+    PART 2  Picks lambda for the "cramer" score (distance correlation) with
+            5-fold splits of the reference network, and plots AUROC vs lambda.
+    PART 3  Box plots of AUROC and AUPRC across pseudotime methods, from
+            summary CSVs made by this script and run_4new pseudo_methods_example.py.
+
+NOTES
+    PART 1 imports cal_pearson2, cal_symmetric_pearson2, cal_js_pearson2 and
+    cal_neyman2, which do not exist in psedoScore.py. The script stops at the
+    import until those get added or removed from the list.
+    Scoring uses concat_ref + cal_auc_aupr (output edges only).
+    PART 2: concat_ref(df_mrmr, ref_test) labels only test-fold reference edges
+    as real, so real edges from the training folds count as fake.
+"""
 
 ############################# All example using the slingshot
 ########################using different lambda for all distances:
@@ -16,6 +39,7 @@ from Evaluate import concat_ref, cal_auc_aupr, add_sign_and_plot
 
 def add_noise(df_expr, noise_level=0.05):
     """Add Gaussian noise to expression matrix."""
+    # Noise per gene scales with that gene's range (max - min). Negatives clip to 0.
     ranges = (df_expr.max() - df_expr.min()).values
     noise = np.random.randn(*df_expr.shape) * ranges
     df_noisy = df_expr + noise * noise_level
@@ -52,6 +76,7 @@ lambda_vals = [0.1, 1, 1.5, 2, 2.5, 3, 5]
 for run in range(1, 6):
     print(f"\n=== RUN {run} ===")
     df_exp_noisy = add_noise(df_exp_orig)
+    # Sliding windows of 5 cells, step 1, on this run's noisy data
     count, df_smoothed = smooth(df_pse, df_exp_noisy, slipe=1, k=5)
     run_summary = {"Run": run}
 
@@ -60,6 +85,7 @@ for run in range(1, 6):
         df_score = score_func(df_smoothed, n_jobs=4)
 
         # Reshape matrix to long form
+        # (some scorers return a genes x genes matrix instead of a pair list)
         if set(df_score.columns) == set(df_smoothed.columns):
             df_score = df_score.stack().reset_index()
             df_score.columns = ['Gene1', 'Gene2', 'score']
@@ -72,6 +98,7 @@ for run in range(1, 6):
             #df_score_lambda = df_score.copy()
             #threshold = df_score_lambda['score'].quantile(1 - lambda_val)
             #df_score_lambda = df_score_lambda[df_score_lambda['score'] >= threshold]
+            # Re-rank pairs with divergence mRMR at this lambda, then grade
             df_mrmr = MRMR2_divergence(df_score, n_jobs=4, lambda_val=lambda_val)
 
             #df_mrmr = MRMR2_divergence(df_score_lambda, n_jobs=4)
@@ -195,6 +222,8 @@ results = []
 
 for lam in lambda_vals:
     aucs = []
+    # Splits the REFERENCE edges into folds. The network itself gets rebuilt
+    # the same way every fold, so the folds only change which edges count as real.
     for train_idx, test_idx in kf.split(df_ref):
         ref_train = df_ref.iloc[train_idx]
         ref_test = df_ref.iloc[test_idx]
@@ -263,6 +292,7 @@ short_names = [name_map[key][1] for key in ordered_keys]    # Short names
 pseudotime_methods = ['diffmap', 'paga', 'pca', 'phate']
 
 # Collect AUROC data
+# One list per score: its mean AUROC under each pseudotime method plus Slingshot
 auroc_data = []
 for raw in name_map.keys():
     if raw not in ordered_keys:  # Skip backwardKL and js_pearson

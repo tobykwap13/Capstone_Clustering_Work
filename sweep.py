@@ -1,6 +1,16 @@
 # -*- coding:utf-8 -*-
 """
-Robustness sweep: scPADGRN clustering (order_cluster) vs original sliding windows (smooth).
+sweep.py - robustness sweep: scPADGRN clustering (order_cluster) vs original sliding windows (smooth).
+
+SUMMARY
+    Runs both preprocessing options across window / cluster sizes (3, 5, 10, 20),
+    several pair scores (MI, KL, JS, Wasserstein, energy, "cramer") and 5 noisy
+    copies of the data, then reports cluster minus smooth for each combination.
+
+WARNING (old scoring)
+    evaluate() uses concat_ref + cal_auc_aupr, which grades only the edges each
+    method output. The numbers in sweep_results*/ come from this scoring.
+    divergence_sweep.py repeats the comparison with fair all-pairs scoring.
 
 For each run, Gaussian noise is added to the expression data (same setup as
 run_slingshot_distance_example.py). Every method / size / scorer combination in
@@ -56,6 +66,7 @@ def add_noise(df_expr, rng, noise_level=0.05):
 
 
 def preprocess(method, df_pse, df_exp, size):
+    # Same (count, df) output either way, so everything downstream stays identical
     if method == "cluster":
         return order_cluster(df_pse, df_exp, cells_per_cluster=size)
     return smooth(df_pse, df_exp, 1, size)
@@ -93,6 +104,7 @@ def evaluate(df_edges, ref_path):
 
 
 def summarize(df_raw, out_dir):
+    # Mean and SD per scorer x size x preprocess, then paired cluster-vs-smooth tests
     summary = (df_raw.groupby(["scorer", "size", "preprocess"])[["AUROC", "AUPRC"]]
                .agg(["mean", "std"]).round(4))
     summary.columns = ["_".join(c) for c in summary.columns]
@@ -174,6 +186,8 @@ def main():
     total = opt.runs * len(opt.scorers) * len(opt.sizes) * 2
     done, t0, rows = 0, time.time(), []
 
+    # Every combination inside one run sees the same noisy data (seed + run),
+    # so cluster and smooth get compared on identical inputs
     for run in range(1, opt.runs + 1):
         rng = np.random.default_rng(opt.seed + run)
         df_noisy = add_noise(df_exp_orig, rng, opt.noise)
