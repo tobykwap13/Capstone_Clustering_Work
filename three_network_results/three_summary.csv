@@ -1,0 +1,5 @@
+net,AUROC_full_mean,AUROC_full_std,AUPRC_full_mean,AUPRC_full_std,AUROC_pipe_mean,AUROC_pipe_std,AUPRC_pipe_mean,AUPRC_pipe_std,edges_mean,edges_std,AUROC_full_clean,AUROC_pipe_clean
+original,0.6114,0.0167,0.293,0.0181,0.5828,0.0362,0.3155,0.0269,179.6,6.0663,0.6206,0.5475
+cluster,0.582,0.0271,0.2697,0.0164,0.5638,0.0605,0.2863,0.0216,179.0,7.3824,0.5659,0.6096
+smooth_lasso,0.6391,0.0205,0.3146,0.0281,0.5431,0.0455,0.3367,0.04,185.0,21.4826,0.6734,0.4574
+lasso_beta0,0.6244,0.0213,0.3071,0.0273,,,,,272.2,11.3886,0.6249,

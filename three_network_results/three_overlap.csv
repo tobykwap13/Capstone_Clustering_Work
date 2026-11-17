@@ -1,0 +1,19 @@
+run,pair,jaccard_topk
+0,original vs cluster,0.2345679012345679
+0,original vs smooth_lasso,0.0989010989010989
+0,cluster vs smooth_lasso,0.0989010989010989
+1,original vs cluster,0.26582278481012656
+1,original vs smooth_lasso,0.12359550561797752
+1,cluster vs smooth_lasso,0.12359550561797752
+2,original vs cluster,0.20481927710843373
+2,original vs smooth_lasso,0.13636363636363635
+2,cluster vs smooth_lasso,0.14942528735632185
+3,original vs cluster,0.14942528735632185
+3,original vs smooth_lasso,0.1111111111111111
+3,cluster vs smooth_lasso,0.12359550561797752
+4,original vs cluster,0.21951219512195122
+4,original vs smooth_lasso,0.0989010989010989
+4,cluster vs smooth_lasso,0.0989010989010989
+5,original vs cluster,0.16279069767441862
+5,original vs smooth_lasso,0.06382978723404255
+5,cluster vs smooth_lasso,0.1111111111111111
